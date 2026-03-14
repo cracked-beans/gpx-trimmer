@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPX Track Trimmer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2128;
+    --surface3: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --text-dim: #484f58;
+    --green: #3fb950;
+    --red: #f85149;
+    --handle-size: 18px;
+    --panel-w: 272px;
+    --tc: #f0a500;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Barlow', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; height: 50px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; z-index: 100; overflow: hidden; }
+  .logo { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; letter-spacing: .12em; color: #f0a500; text-transform: uppercase; flex-shrink: 0; }
+  .logo span { color: var(--text-muted); font-weight: 400; }
+  .sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+  .file-btn { display: flex; align-items: center; gap: 7px; background: var(--surface3); border: 1px solid var(--border); border-radius: 6px; padding: 6px 11px; color: var(--text); font-family: 'Barlow', sans-serif; font-size: 13px; cursor: pointer; transition: border-color .15s, color .15s; flex-shrink: 0; white-space: nowrap; }
+  .file-btn:hover { border-color: #f0a500; color: #f0a500; }
+  .chips-row { display: flex; gap: 6px; overflow-x: auto; flex: 1; scrollbar-width: none; align-items: center; }
+  .chips-row::-webkit-scrollbar { display: none; }
+  .chip { display: flex; align-items: center; gap: 5px; padding: 4px 10px 4px 8px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-muted); transition: all .15s; font-family: 'Barlow', sans-serif; white-space: nowrap; flex-shrink: 0; }
+  .chip:hover { color: var(--text); border-color: var(--text-muted); }
+  .chip.active { color: var(--tc); border-color: var(--tc); background: color-mix(in srgb, var(--tc) 10%, transparent); }
+  .chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tc); flex-shrink: 0; }
+  .chip-del { margin-left: 3px; width: 14px; height: 14px; border-radius: 50%; background: transparent; border: none; color: inherit; cursor: pointer; font-size: 11px; display: flex; align-items: center; justify-content: center; opacity: .5; transition: opacity .15s; padding: 0; font-family: monospace; line-height: 1; }
+  .chip-del:hover { opacity: 1; }
+  .export-btn { display: flex; align-items: center; gap: 7px; background: #f0a500; border: none; border-radius: 6px; padding: 7px 13px; color: #0d1117; font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; flex-shrink: 0; white-space: nowrap; }
+  .export-btn:hover { background: #ffc53d; }
+  .export-btn:disabled { background: var(--surface3); color: var(--text-dim); cursor: default; }
+
+  /* ── Main ── */
+  .main { flex: 1; display: flex; overflow: hidden; position: relative; }
+  #map { flex: 1; height: 100%; z-index: 1; }
+  .leaflet-tile-pane { filter: brightness(.68) saturate(.55); }
+  .leaflet-control-attribution { display: none; }
+  .leaflet-control-zoom a { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
+  .leaflet-control-zoom a:hover { background: var(--surface3) !important; }
+
+  /* ── Panel ── */
+  .panel { width: var(--panel-w); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; z-index: 2; }
+  .psec { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .plabel { font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: .1em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 10px; }
+  .time-display { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; margin-bottom: 8px; }
+  .time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .time-row:last-child { margin-bottom: 0; }
+  .tdot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .tdot.s { background: var(--green); }
+  .tdot.e { background: var(--red); }
+  .ttime { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--text); }
+  .tsub { font-size: 10px; color: var(--text-muted); margin-left: auto; }
+  .srow { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .srow:last-child { margin-bottom: 0; }
+  .slabel { font-size: 12px; color: var(--text-muted); }
+  .sval { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--text); font-weight: 700; }
+  .sval.hl { color: var(--tc); }
+  .trim-badges { display: flex; gap: 8px; margin-top: 8px; }
+  .tbadge { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; text-align: center; }
+  .tbadge-l { font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px; }
+  .tbadge-v { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .tbadge-v.cut { color: var(--red); }
+  .reset-btn { width: 100%; margin-top: 10px; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 7px; color: var(--text-muted); font-family: 'Barlow', sans-serif; font-size: 12px; cursor: pointer; transition: all .15s; }
+  .reset-btn:hover { border-color: var(--text-muted); color: var(--text); }
+  .elev-chart { height: 72px; position: relative; margin-top: 4px; }
+  .elev-chart canvas { width: 100%; height: 100%; display: block; }
+  .panel-empty { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .panel-empty-inner { text-align: center; }
+  .panel-empty-icon { font-size: 36px; opacity: .25; margin-bottom: 12px; }
+  .panel-empty-text { font-size: 13px; color: var(--text-dim); line-height: 1.8; }
+
+  /* ── Empty map overlay ── */
+  .map-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; z-index: 10; gap: 0; }
+  .map-empty-icon { font-size: 48px; opacity: .2; margin-bottom: 14px; }
+  .map-empty-title { font-size: 17px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
+  .map-empty-sub { font-size: 13px; color: var(--text-dim); }
+
+  /* ── Timeline ── */
+  .tl-wrap { background: var(--surface); border-top: 1px solid var(--border); padding: 13px 18px 15px; flex-shrink: 0; user-select: none; }
+  .tl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+  .tl-title { font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: .1em; color: var(--text-dim); text-transform: uppercase; }
+  .tl-dur { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--tc); }
+  .tl-outer { position: relative; height: 44px; display: flex; align-items: center; }
+  .tl-track { position: relative; width: 100%; height: 6px; background: var(--surface3); border-radius: 3px; border: 1px solid var(--border); cursor: pointer; }
+  .tl-excl-l, .tl-excl-r { position: absolute; top: 0; height: 100%; background: var(--surface3); pointer-events: none; border-radius: 3px 0 0 3px; }
+  .tl-excl-r { border-radius: 0 3px 3px 0; left: auto !important; right: 0; }
+  .tl-fill { position: absolute; top: 0; height: 100%; background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 40%, transparent), var(--tc)); pointer-events: none; border-radius: 2px; }
+  .handle { position: absolute; top: 50%; width: var(--handle-size); height: 28px; transform: translate(-50%,-50%); background: var(--tc); border-radius: 4px; cursor: ew-resize; display: flex; align-items: center; justify-content: center; z-index: 10; box-shadow: 0 0 0 2px color-mix(in srgb, var(--tc) 30%, transparent), 0 2px 8px rgba(0,0,0,.5); transition: box-shadow .15s; }
+  .handle:hover, .handle.dragging { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tc) 50%, transparent), 0 4px 12px rgba(0,0,0,.6); }
+  .handle-lines { display: flex; gap: 2px; }
+  .handle-line { width: 2px; height: 12px; background: rgba(0,0,0,.5); border-radius: 1px; }
+  .handle-tip { position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--tc); border-radius: 4px; padding: 3px 7px; font-family: 'Space Mono', monospace; font-size: 10px; color: var(--tc); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s; }
+  .handle:hover .handle-tip, .handle.dragging .handle-tip { opacity: 1; }
+  .tl-times { display: flex; justify-content: space-between; margin-top: 6px; font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text-dim); }
+
+  /* ── Drop overlay ── */
+  .drop-overlay { position: fixed; inset: 0; background: rgba(240,165,0,.07); border: 2px dashed #f0a500; z-index: 999; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #f0a500; font-weight: 500; pointer-events: none; opacity: 0; transition: opacity .2s; }
+  .drop-overlay.show { opacity: 1; }
+  #fileInput { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">GPX<span> Trimmer</span></div>
+  <div class="sep"></div>
+  <button class="file-btn" onclick="document.getElementById('fileInput').click()">
+    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+    Load GPX
+  </button>
+  <div class="chips-row" id="chipsRow"></div>
+  <button class="export-btn" id="exportBtn" onclick="exportActive()" disabled>
+    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+    Export Trimmed
+  </button>
+</header>
+
+<div class="main">
+  <div id="map">
+    <div class="map-empty" id="mapEmpty">
+      <div class="map-empty-icon">🗺️</div>
+      <div class="map-empty-title">No tracks loaded</div>
+      <div class="map-empty-sub">Click "Load GPX" or drop files here</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-empty" id="panelEmpty">
+      <div class="panel-empty-inner">
+        <div class="panel-empty-icon">📍</div>
+        <div class="panel-empty-text">Load a .gpx file<br>to begin trimming</div>
+      </div>
+    </div>
+    <div id="panelContent" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+      <div class="psec" id="pSelSec">
+        <div class="plabel">Selection</div>
+        <div class="time-display">
+          <div class="time-row"><div class="tdot s"></div><div class="ttime" id="pStartT">—</div><div class="tsub" id="pStartI">—</div></div>
+          <div class="time-row"><div class="tdot e"></div><div class="ttime" id="pEndT">—</div><div class="tsub" id="pEndI">—</div></div>
+        </div>
+        <div class="srow"><span class="slabel">Duration</span><span class="sval hl" id="pDur">—</span></div>
+        <div class="srow"><span class="slabel">Distance</span><span class="sval" id="pDist">—</span></div>
+        <div class="srow"><span class="slabel">Points</span><span class="sval" id="pPts">—</span></div>
+      </div>
+      <div class="psec">
+        <div class="plabel">Trimmed Off</div>
+        <div class="trim-badges">
+          <div class="tbadge"><span class="tbadge-l">Start</span><span class="tbadge-v cut" id="pTrimS">—</span></div>
+          <div class="tbadge"><span class="tbadge-l">End</span><span class="tbadge-v cut" id="pTrimE">—</span></div>
+        </div>
+        <button class="reset-btn" onclick="resetTrim()">↺ Reset Trim</button>
+      </div>
+      <div class="psec" style="flex:1">
+        <div class="plabel">Elevation Profile</div>
+        <div class="elev-chart"><canvas id="elevCanvas"></canvas></div>
+      </div>
+      <div class="psec">
+        <div class="plabel">Full Track</div>
+        <div class="srow"><span class="slabel">Total points</span><span class="sval" id="pTotalPts">—</span></div>
+        <div class="srow"><span class="slabel">Total duration</span><span class="sval" id="pTotalDur">—</span></div>
+        <div class="srow"><span class="slabel">Elev. range</span><span class="sval" id="pElevR">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="tl-wrap" id="tlWrap" style="--tc:#f0a500">
+  <div class="tl-header">
+    <span class="tl-title" id="tlTitle">Timeline — load a GPX file to start</span>
+    <span class="tl-dur" id="tlDur"></span>
+  </div>
+  <div class="tl-outer">
+    <div class="tl-track" id="tlTrack">
+      <div class="tl-excl-l" id="tlExclL" style="width:0"></div>
+      <div class="tl-excl-r" id="tlExclR" style="width:0"></div>
+      <div class="tl-fill"   id="tlFill"  style="left:0;width:100%"></div>
+      <div class="handle" id="hStart" style="left:0">
+        <div class="handle-lines"><div class="handle-line"></div><div class="handle-line"></div><div class="handle-line"></div></div>
+        <div class="handle-tip" id="tipStart">—</div>
+      </div>
+      <div class="handle" id="hEnd" style="left:100%">
+        <div class="handle-lines"><div class="handle-line"></div><div class="handle-line"></div><div class="handle-line"></div></div>
+        <div class="handle-tip" id="tipEnd">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="tl-times"><span id="tlT0">—</span><span id="tlTm">—</span><span id="tlT1">—</span></div>
+</div>
+
+<div class="drop-overlay" id="dropOverlay">Drop GPX files here</div>
+<input type="file" id="fileInput" accept=".gpx" multiple>
+
+<script>
+const PALETTE = ['#f0a500','#58a6ff','#bc8cff','#3fb950','#ff7b72','#ffa657','#39d5b0','#f778ba'];
+
+let tracks = [];
+let activeIdx = -1;
+
+// ── Map ──────────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, attributionControl: false }).setView([20,0], 2);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const fmtTime = d => d instanceof Date && !isNaN(d) ? d.toISOString().substring(11,19) : '—';
+const fmtDur = s => { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60); return h>0?`${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`:`${m}m ${String(sec).padStart(2,'0')}s`; };
+const hav = (a,b) => { const R=6371000,dLat=(b.lat-a.lat)*Math.PI/180,dLon=(b.lon-a.lon)*Math.PI/180,x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLon/2)**2; return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x)); };
+const calcDist = pts => { let d=0; for(let i=1;i<pts.length;i++) d+=hav(pts[i-1],pts[i]); return d; };
+const fmtDist = m => m>=1000?(m/1000).toFixed(2)+' km':Math.round(m)+' m';
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ── Parse ────────────────────────────────────────────────────────────────────
+function parseGPX(xml, filename) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const pts = [];
+  doc.querySelectorAll('trkpt').forEach(pt => pts.push({
+    lat: parseFloat(pt.getAttribute('lat')),
+    lon: parseFloat(pt.getAttribute('lon')),
+    ele: parseFloat(pt.querySelector('ele')?.textContent || 0),
+    time: new Date(pt.querySelector('time')?.textContent),
+  }));
+  const rawName = doc.querySelector('name')?.textContent?.trim();
+  const name = (rawName && rawName !== '') ? rawName : filename.replace(/\.gpx$/i,'');
+  return { name, points: pts };
+}
+
+// ── Load files ───────────────────────────────────────────────────────────────
+function loadFiles(files) {
+  const readers = Array.from(files).map(f => new Promise(res => {
+    const r = new FileReader();
+    r.onload = e => res({ name: f.name, content: e.target.result });
+    r.readAsText(f);
+  }));
+  Promise.all(readers).then(results => {
+    results.forEach(r => {
+      const parsed = parseGPX(r.content, r.name);
+      const ci = tracks.length % PALETTE.length;
+      tracks.push({ name: parsed.name, points: parsed.points, color: PALETTE[ci], ci, trimStart: 0, trimEnd: parsed.points.length-1, layers: {} });
+    });
+    document.getElementById('mapEmpty').style.display = 'none';
+    document.getElementById('exportBtn').disabled = false;
+    document.getElementById('panelEmpty').style.display = 'none';
+    document.getElementById('panelContent').style.display = 'flex';
+    rebuildChips();
+    renderAllTracks();
+    const newIdx = tracks.length - results.length; // first newly added
+    selectTrack(newIdx);
+    fitAll();
+  });
+}
+
+// ── Chips ────────────────────────────────────────────────────────────────────
+function rebuildChips() {
+  const row = document.getElementById('chipsRow');
+  row.innerHTML = '';
+  tracks.forEach((t, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'chip' + (i===activeIdx?' active':'');
+    btn.style.setProperty('--tc', t.color);
+    btn.innerHTML = `<div class="chip-dot"></div>${esc(t.name.substring(0,22))}<button class="chip-del" title="Remove">✕</button>`;
+    btn.querySelector('.chip-dot').addEventListener('click', () => selectTrack(i));
+    btn.addEventListener('click', ev => { if(!ev.target.classList.contains('chip-del')) selectTrack(i); });
+    btn.querySelector('.chip-del').addEventListener('click', ev => { ev.stopPropagation(); removeTrack(i); });
+    row.appendChild(btn);
+  });
+}
+
+// ── Remove track ─────────────────────────────────────────────────────────────
+function removeTrack(i) {
+  const t = tracks[i];
+  Object.values(t.layers).forEach(l => { if(l) map.removeLayer(l); });
+  tracks.splice(i,1);
+  if (!tracks.length) {
+    activeIdx = -1;
+    document.getElementById('panelEmpty').style.display = 'flex';
+    document.getElementById('panelContent').style.display = 'none';
+    document.getElementById('exportBtn').disabled = true;
+    document.getElementById('mapEmpty').style.display = 'flex';
+    document.getElementById('tlTitle').textContent = 'Timeline — load a GPX file to start';
+    document.getElementById('tlDur').textContent = '';
+    ['tlT0','tlTm','tlT1'].forEach(id => document.getElementById(id).textContent = '—');
+    setTlColor('#f0a500');
+    rebuildChips();
+    return;
+  }
+  if (activeIdx >= tracks.length) activeIdx = tracks.length-1;
+  rebuildChips();
+  renderAllTracks();
+  selectTrack(activeIdx < tracks.length ? activeIdx : 0);
+}
+
+// ── Render all ───────────────────────────────────────────────────────────────
+function renderAllTracks() { tracks.forEach((_,i) => renderTrack(i)); }
+
+function renderTrack(i) {
+  const t = tracks[i];
+  const pts = t.points;
+  Object.values(t.layers).forEach(l => { if(l) map.removeLayer(l); });
+  t.layers = {};
+  if (!pts.length) return;
+  const ll = pts.map(p=>[p.lat,p.lon]);
+  const isActive = i === activeIdx;
+
+  if (t.trimStart > 0)
+    t.layers.excl1 = L.polyline(ll.slice(0, t.trimStart+1), { color:'#30363d', weight:2, opacity:.6 }).addTo(map);
+  if (t.trimEnd < pts.length-1)
+    t.layers.excl2 = L.polyline(ll.slice(t.trimEnd),       { color:'#30363d', weight:2, opacity:.6 }).addTo(map);
+
+  t.layers.active = L.polyline(ll.slice(t.trimStart, t.trimEnd+1), {
+    color: t.color, weight: isActive ? 5 : 3, opacity: isActive ? 1 : 0.6, lineCap:'round', lineJoin:'round'
+  }).addTo(map);
+
+  const mkIcon = c => L.divIcon({ html:`<div style="width:10px;height:10px;border-radius:50%;background:${c};border:2px solid #fff;box-shadow:0 0 6px ${c}88"></div>`, className:'', iconSize:[10,10], iconAnchor:[5,5] });
+  t.layers.mStart = L.marker([pts[t.trimStart].lat, pts[t.trimStart].lon], { icon: mkIcon('#3fb950') }).addTo(map);
+  t.layers.mEnd   = L.marker([pts[t.trimEnd].lat,   pts[t.trimEnd].lon],   { icon: mkIcon('#f85149') }).addTo(map);
+}
+
+function fitAll() {
+  const all = tracks.flatMap(t => t.points.map(p=>[p.lat,p.lon]));
+  if (all.length) map.fitBounds(L.latLngBounds(all), { padding:[30,30] });
+}
+
+// ── Select ───────────────────────────────────────────────────────────────────
+function selectTrack(i) {
+  activeIdx = i;
+  const t = tracks[i]; if(!t) return;
+  rebuildChips();
+  document.getElementById('pSelSec').style.setProperty('--tc', t.color);
+  setTlColor(t.color);
+  buildTimelineUI();
+  updatePanelStats();
+  drawElevation();
+  renderAllTracks();
+  const pts = t.points;
+  if (pts.length) map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])), { padding:[40,40], maxZoom:19 });
+}
+
+function setTlColor(color) {
+  document.getElementById('tlWrap').style.setProperty('--tc', color);
+  document.getElementById('hStart').style.background = color;
+  document.getElementById('hEnd').style.background   = color;
+}
+
+// ── Timeline ─────────────────────────────────────────────────────────────────
+function buildTimelineUI() {
+  const t = tracks[activeIdx]; if(!t) return;
+  const pts = t.points;
+  const totalSec = pts.length>=2 ? (pts[pts.length-1].time - pts[0].time)/1000 : 0;
+  document.getElementById('tlTitle').textContent = `${t.name} — drag handles to trim`;
+  document.getElementById('tlT0').textContent = fmtTime(pts[0]?.time);
+  document.getElementById('tlTm').textContent = fmtTime(new Date((pts[0]?.time?.getTime()||0)+totalSec*500));
+  document.getElementById('tlT1').textContent = fmtTime(pts[pts.length-1]?.time);
+  updateTlHandles();
+}
+
+function updateTlHandles() {
+  const t = tracks[activeIdx]; if(!t) return;
+  const n = t.points.length-1;
+  const sp = n>0 ? t.trimStart/n : 0;
+  const ep = n>0 ? t.trimEnd/n   : 1;
+  document.getElementById('hStart').style.left = (sp*100)+'%';
+  document.getElementById('hEnd').style.left   = (ep*100)+'%';
+  document.getElementById('tlFill').style.left  = (sp*100)+'%';
+  document.getElementById('tlFill').style.width = ((ep-sp)*100)+'%';
+  document.getElementById('tlExclL').style.width = (sp*100)+'%';
+  document.getElementById('tlExclR').style.width = ((1-ep)*100)+'%';
+  document.getElementById('tipStart').textContent = fmtTime(t.points[t.trimStart]?.time);
+  document.getElementById('tipEnd').textContent   = fmtTime(t.points[t.trimEnd]?.time);
+  const sel = t.points.slice(t.trimStart, t.trimEnd+1);
+  const dur = sel.length>=2 ? (sel[sel.length-1].time-sel[0].time)/1000 : 0;
+  document.getElementById('tlDur').textContent = fmtDur(dur);
+}
+
+// ── Panel stats ───────────────────────────────────────────────────────────────
+function updatePanelStats() {
+  const t = tracks[activeIdx]; if(!t) return;
+  const pts = t.points, sel = pts.slice(t.trimStart, t.trimEnd+1);
+  const dur = sel.length>=2 ? (sel[sel.length-1].time-sel[0].time)/1000 : 0;
+  document.getElementById('pStartT').textContent = fmtTime(pts[t.trimStart]?.time);
+  document.getElementById('pEndT').textContent   = fmtTime(pts[t.trimEnd]?.time);
+  document.getElementById('pStartI').textContent = `pt ${t.trimStart+1}`;
+  document.getElementById('pEndI').textContent   = `pt ${t.trimEnd+1}`;
+  document.getElementById('pDur').textContent    = fmtDur(dur);
+  document.getElementById('pDist').textContent   = fmtDist(calcDist(sel));
+  document.getElementById('pPts').textContent    = sel.length;
+  const trimSSec = t.trimStart>0 ? (pts[t.trimStart].time-pts[0].time)/1000 : 0;
+  const trimESec = t.trimEnd<pts.length-1 ? (pts[pts.length-1].time-pts[t.trimEnd].time)/1000 : 0;
+  document.getElementById('pTrimS').textContent = t.trimStart>0 ? fmtDur(trimSSec) : '—';
+  document.getElementById('pTrimE').textContent = t.trimEnd<pts.length-1 ? fmtDur(trimESec) : '—';
+  const totalSec = pts.length>=2 ? (pts[pts.length-1].time-pts[0].time)/1000 : 0;
+  document.getElementById('pTotalPts').textContent = pts.length;
+  document.getElementById('pTotalDur').textContent = fmtDur(totalSec);
+  const eles = pts.map(p=>p.ele);
+  document.getElementById('pElevR').textContent = `${Math.round(Math.min(...eles))}–${Math.round(Math.max(...eles))} m`;
+}
+
+// ── Elevation ─────────────────────────────────────────────────────────────────
+function drawElevation() {
+  const canvas = document.getElementById('elevCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.parentElement.clientWidth, H = canvas.parentElement.clientHeight;
+  canvas.width = W*2; canvas.height = H*2; ctx.scale(2,2);
+  ctx.clearRect(0,0,W,H);
+  const t = tracks[activeIdx]; if(!t || t.points.length<2) return;
+  const pts = t.points, eles = pts.map(p=>p.ele);
+  const minE=Math.min(...eles), maxE=Math.max(...eles), rng=maxE-minE||1;
+  const xOf = i => (i/(pts.length-1))*W;
+  const yOf = e => H-4-((e-minE)/rng)*(H-8);
+  ctx.beginPath(); ctx.moveTo(xOf(0),yOf(eles[0]));
+  for(let i=1;i<pts.length;i++) ctx.lineTo(xOf(i),yOf(eles[i]));
+  ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+  ctx.fillStyle='rgba(48,54,61,0.5)'; ctx.fill();
+  if (t.trimEnd>t.trimStart) {
+    ctx.beginPath(); ctx.moveTo(xOf(t.trimStart),yOf(eles[t.trimStart]));
+    for(let i=t.trimStart;i<=t.trimEnd;i++) ctx.lineTo(xOf(i),yOf(eles[i]));
+    ctx.lineTo(xOf(t.trimEnd),H); ctx.lineTo(xOf(t.trimStart),H); ctx.closePath();
+    const g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,t.color+'88'); g.addColorStop(1,t.color+'11');
+    ctx.fillStyle=g; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(xOf(t.trimStart),yOf(eles[t.trimStart]));
+    for(let i=t.trimStart+1;i<=t.trimEnd;i++) ctx.lineTo(xOf(i),yOf(eles[i]));
+    ctx.strokeStyle=t.color+'cc'; ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.stroke();
+  }
+}
+
+// ── Drag ─────────────────────────────────────────────────────────────────────
+let dragging=null, tlRect=null;
+
+function pctToIdx(pct) {
+  const t=tracks[activeIdx]; if(!t) return 0;
+  return Math.round(pct*(t.points.length-1));
+}
+function applyDrag(clientX) {
+  if (!dragging||!tlRect) return;
+  const t=tracks[activeIdx]; if(!t) return;
+  const pct=Math.max(0,Math.min(clientX-tlRect.left,tlRect.width))/tlRect.width;
+  const idx=pctToIdx(pct);
+  if (dragging==='start') t.trimStart=Math.max(0,Math.min(idx,t.trimEnd-1));
+  else t.trimEnd=Math.min(t.points.length-1,Math.max(idx,t.trimStart+1));
+  updateTlHandles(); updatePanelStats(); drawElevation(); renderTrack(activeIdx);
+}
+function stopDrag() {
+  if (!dragging) return;
+  document.getElementById(dragging==='start'?'hStart':'hEnd').classList.remove('dragging');
+  dragging=null;
+}
+function beginDrag(ev, which) {
+  dragging=which;
+  tlRect=document.getElementById('tlTrack').getBoundingClientRect();
+  document.getElementById(which==='start'?'hStart':'hEnd').classList.add('dragging');
+  ev.preventDefault();
+}
+
+document.getElementById('hStart').addEventListener('mousedown', e=>beginDrag(e,'start'));
+document.getElementById('hEnd').addEventListener('mousedown',   e=>beginDrag(e,'end'));
+document.addEventListener('mousemove', e=>applyDrag(e.clientX));
+document.addEventListener('mouseup', stopDrag);
+document.getElementById('hStart').addEventListener('touchstart', e=>beginDrag(e,'start'), {passive:false});
+document.getElementById('hEnd').addEventListener('touchstart',   e=>beginDrag(e,'end'),   {passive:false});
+document.addEventListener('touchmove', e=>applyDrag(e.touches[0].clientX), {passive:false});
+document.addEventListener('touchend', stopDrag);
+
+document.getElementById('tlTrack').addEventListener('click', e => {
+  const t=tracks[activeIdx]; if(!t) return;
+  tlRect=document.getElementById('tlTrack').getBoundingClientRect();
+  const pct=Math.max(0,Math.min(e.clientX-tlRect.left,tlRect.width))/tlRect.width;
+  const idx=pctToIdx(pct);
+  if (Math.abs(idx-t.trimStart)<=Math.abs(idx-t.trimEnd)) t.trimStart=Math.max(0,Math.min(idx,t.trimEnd-1));
+  else t.trimEnd=Math.min(t.points.length-1,Math.max(idx,t.trimStart+1));
+  updateTlHandles(); updatePanelStats(); drawElevation(); renderTrack(activeIdx);
+});
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+function resetTrim() {
+  const t=tracks[activeIdx]; if(!t) return;
+  t.trimStart=0; t.trimEnd=t.points.length-1;
+  updateTlHandles(); updatePanelStats(); drawElevation(); renderTrack(activeIdx);
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportActive() {
+  const t=tracks[activeIdx]; if(!t) return;
+  const pts=t.points.slice(t.trimStart,t.trimEnd+1);
+  const body=pts.map(p=>`      <trkpt lat="${p.lat}" lon="${p.lon}">\n        <ele>${p.ele}</ele>\n        <time>${p.time.toISOString()}</time>\n      </trkpt>`).join('\n');
+  const gpx=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="GPX Trimmer">\n  <trk>\n    <name>${esc(t.name)}_trimmed</name>\n    <trkseg>\n${body}\n    </trkseg>\n  </trk>\n</gpx>`;
+  const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([gpx],{type:'application/gpx+xml'})),download:t.name+'_trimmed.gpx'});
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ── File input / drop ─────────────────────────────────────────────────────────
+document.getElementById('fileInput').addEventListener('change', e => { if(e.target.files.length) loadFiles(e.target.files); e.target.value=''; });
+const dropEl=document.getElementById('dropOverlay');
+document.addEventListener('dragover', e=>{e.preventDefault();dropEl.classList.add('show');});
+document.addEventListener('dragleave', e=>{if(!e.relatedTarget)dropEl.classList.remove('show');});
+document.addEventListener('drop', e=>{e.preventDefault();dropEl.classList.remove('show');if(e.dataTransfer.files.length)loadFiles(e.dataTransfer.files);});
+window.addEventListener('resize', ()=>{if(activeIdx>=0) drawElevation();});
+</script>
+</body>
+</html>
