@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f0a500">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GPX Trim">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <title>GPX Track Trimmer</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -613,6 +620,14 @@ document.addEventListener('dragover', e=>{e.preventDefault();dropEl.classList.ad
 document.addEventListener('dragleave', e=>{if(!e.relatedTarget)dropEl.classList.remove('show');});
 document.addEventListener('drop', e=>{e.preventDefault();dropEl.classList.remove('show');if(e.dataTransfer.files.length)loadFiles(e.dataTransfer.files);});
 window.addEventListener('resize', ()=>{ if(activeIdx>=0) drawElevation(); });
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js');
+    });
+  }
 </script>
 </body>
 </html>
