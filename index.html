@@ -54,8 +54,79 @@
   .leaflet-control-zoom a { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
   .leaflet-control-zoom a:hover { background: var(--surface3) !important; }
 
-  /* ── Panel ── */
-  .panel { width: var(--panel-w); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; z-index: 2; }
+  /* ── Panel ──
+     The key fix: the toggle button is a sibling of .panel inside .main,
+     NOT a child of .panel. This way panel's overflow:hidden never clips it.
+  */
+  .panel {
+    width: var(--panel-w);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+    z-index: 10;
+    transition: width .28s cubic-bezier(.4,0,.2,1), border-color .28s;
+  }
+  .panel.collapsed { width: 0; border-left-color: transparent; }
+
+  /* Toggle tab — positioned in .main, always visible regardless of panel state */
+  .panel-toggle {
+    position: absolute;
+    right: var(--panel-w);   /* slides with the panel via transition */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px; height: 96px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    cursor: pointer;
+    z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    transition: right .28s cubic-bezier(.4,0,.2,1), background .15s, color .15s;
+    padding: 0;
+  }
+  .panel-toggle:hover { background: var(--surface3); color: var(--text); }
+  .panel-toggle svg { display: block; flex-shrink: 0; transition: transform .28s cubic-bezier(.4,0,.2,1); }
+
+  /* When panel is collapsed (desktop), tab moves flush to the right edge */
+  .panel.collapsed ~ .panel-toggle,
+  .panel-toggle.collapsed { right: 0; }
+  /* Arrow flips (desktop) */
+  .panel.collapsed ~ .panel-toggle svg,
+  .panel-toggle.collapsed svg { transform: rotate(180deg); }
+
+  /* ── Mobile: collapse via CSS so there is zero flash on load ── */
+  @media (max-width: 768px) {
+    /* Panel starts at 0 width, no transition (prevents animated open on first paint) */
+    .panel { width: 0 !important; border-left-color: transparent !important; transition: none; }
+    /* After JS adds .ready the transition re-engages for user interactions */
+    .panel.ready { transition: width .28s cubic-bezier(.4,0,.2,1), border-color .28s; }
+    .panel.ready.open { width: var(--panel-w) !important; border-left-color: var(--border) !important; }
+
+    /* Toggle: bigger tap target, starts at right:0 (panel closed) */
+    .panel-toggle {
+      right: 0 !important;
+      width: 56px !important;
+      height: 112px !important;
+      border-radius: 14px 0 0 14px !important;
+      transition: none;
+    }
+    .panel.ready ~ .panel-toggle {
+      transition: right .28s cubic-bezier(.4,0,.2,1), background .15s, color .15s;
+    }
+    .panel.ready.open ~ .panel-toggle { right: var(--panel-w) !important; }
+
+    /* Arrow points left by default (panel is closed → clicking opens it) */
+    .panel ~ .panel-toggle svg { transform: rotate(180deg) !important; }
+    .panel.ready.open ~ .panel-toggle svg { transform: rotate(0deg) !important; }
+
+    .logo span { display: none; }
+  }
+
+  /* psec and panel content */
   .psec { padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .plabel { font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: .1em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 10px; }
   .time-display { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; margin-bottom: 8px; }
@@ -86,7 +157,7 @@
   .panel-empty-text { font-size: 13px; color: var(--text-dim); line-height: 1.8; }
 
   /* ── Empty map overlay ── */
-  .map-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; z-index: 10; gap: 0; }
+  .map-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; z-index: 10; }
   .map-empty-icon { font-size: 48px; opacity: .2; margin-bottom: 14px; }
   .map-empty-title { font-size: 17px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
   .map-empty-sub { font-size: 13px; color: var(--text-dim); }
@@ -113,6 +184,8 @@
   .drop-overlay { position: fixed; inset: 0; background: rgba(240,165,0,.07); border: 2px dashed #f0a500; z-index: 999; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #f0a500; font-weight: 500; pointer-events: none; opacity: 0; transition: opacity .2s; }
   .drop-overlay.show { opacity: 1; }
   #fileInput { display: none; }
+
+
 </style>
 </head>
 <body>
@@ -127,11 +200,11 @@
   <div class="chips-row" id="chipsRow"></div>
   <button class="export-btn" id="exportBtn" onclick="exportActive()" disabled>
     <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-    Export Trimmed
+    Export
   </button>
 </header>
 
-<div class="main">
+<div class="main" id="mainArea">
   <div id="map">
     <div class="map-empty" id="mapEmpty">
       <div class="map-empty-icon">🗺️</div>
@@ -140,7 +213,12 @@
     </div>
   </div>
 
-  <div class="panel">
+  <!--
+    IMPORTANT: .panel-toggle is a sibling of .panel, placed BEFORE it in the DOM
+    so the CSS adjacent-sibling trick works: .panel.collapsed ~ .panel-toggle
+    It lives in .main which is position:relative, so it can be absolutely positioned.
+  -->
+  <div class="panel" id="panel">
     <div class="panel-empty" id="panelEmpty">
       <div class="panel-empty-inner">
         <div class="panel-empty-icon">📍</div>
@@ -178,6 +256,13 @@
       </div>
     </div>
   </div>
+
+  <!-- Toggle tab: sibling AFTER .panel so CSS ~ selector works -->
+  <button class="panel-toggle" id="panelToggle" title="Toggle sidebar" onclick="togglePanel()">
+    <svg width="6" height="12" viewBox="0 0 6 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="1,1 5,6 1,11"/>
+    </svg>
+  </button>
 </div>
 
 <div class="tl-wrap" id="tlWrap" style="--tc:#f0a500">
@@ -212,19 +297,26 @@ const PALETTE = ['#f0a500','#58a6ff','#bc8cff','#3fb950','#ff7b72','#ffa657','#3
 let tracks = [];
 let activeIdx = -1;
 
-// ── Map ──────────────────────────────────────────────────────────────────────
+// ── Map ───────────────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true, attributionControl: false }).setView([20,0], 2);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const fmtTime = d => d instanceof Date && !isNaN(d) ? d.toISOString().substring(11,19) : '—';
-const fmtDur = s => { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60); return h>0?`${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`:`${m}m ${String(sec).padStart(2,'0')}s`; };
-const hav = (a,b) => { const R=6371000,dLat=(b.lat-a.lat)*Math.PI/180,dLon=(b.lon-a.lon)*Math.PI/180,x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLon/2)**2; return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x)); };
+const fmtDur = s => {
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=Math.floor(s%60);
+  return h>0 ? `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s` : `${m}m ${String(sec).padStart(2,'0')}s`;
+};
+const hav = (a,b) => {
+  const R=6371000, dLat=(b.lat-a.lat)*Math.PI/180, dLon=(b.lon-a.lon)*Math.PI/180;
+  const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+};
 const calcDist = pts => { let d=0; for(let i=1;i<pts.length;i++) d+=hav(pts[i-1],pts[i]); return d; };
 const fmtDist = m => m>=1000?(m/1000).toFixed(2)+' km':Math.round(m)+' m';
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-// ── Parse ────────────────────────────────────────────────────────────────────
+// ── Parse GPX ─────────────────────────────────────────────────────────────────
 function parseGPX(xml, filename) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   const pts = [];
@@ -235,11 +327,11 @@ function parseGPX(xml, filename) {
     time: new Date(pt.querySelector('time')?.textContent),
   }));
   const rawName = doc.querySelector('name')?.textContent?.trim();
-  const name = (rawName && rawName !== '') ? rawName : filename.replace(/\.gpx$/i,'');
+  const name = rawName || filename.replace(/\.gpx$/i,'');
   return { name, points: pts };
 }
 
-// ── Load files ───────────────────────────────────────────────────────────────
+// ── Load files ────────────────────────────────────────────────────────────────
 function loadFiles(files) {
   const readers = Array.from(files).map(f => new Promise(res => {
     const r = new FileReader();
@@ -258,13 +350,12 @@ function loadFiles(files) {
     document.getElementById('panelContent').style.display = 'flex';
     rebuildChips();
     renderAllTracks();
-    const newIdx = tracks.length - results.length; // first newly added
-    selectTrack(newIdx);
+    selectTrack(tracks.length - results.length);
     fitAll();
   });
 }
 
-// ── Chips ────────────────────────────────────────────────────────────────────
+// ── Chips ─────────────────────────────────────────────────────────────────────
 function rebuildChips() {
   const row = document.getElementById('chipsRow');
   row.innerHTML = '';
@@ -273,17 +364,15 @@ function rebuildChips() {
     btn.className = 'chip' + (i===activeIdx?' active':'');
     btn.style.setProperty('--tc', t.color);
     btn.innerHTML = `<div class="chip-dot"></div>${esc(t.name.substring(0,22))}<button class="chip-del" title="Remove">✕</button>`;
-    btn.querySelector('.chip-dot').addEventListener('click', () => selectTrack(i));
     btn.addEventListener('click', ev => { if(!ev.target.classList.contains('chip-del')) selectTrack(i); });
     btn.querySelector('.chip-del').addEventListener('click', ev => { ev.stopPropagation(); removeTrack(i); });
     row.appendChild(btn);
   });
 }
 
-// ── Remove track ─────────────────────────────────────────────────────────────
+// ── Remove track ──────────────────────────────────────────────────────────────
 function removeTrack(i) {
-  const t = tracks[i];
-  Object.values(t.layers).forEach(l => { if(l) map.removeLayer(l); });
+  Object.values(tracks[i].layers).forEach(l => { if(l) map.removeLayer(l); });
   tracks.splice(i,1);
   if (!tracks.length) {
     activeIdx = -1;
@@ -299,55 +388,47 @@ function removeTrack(i) {
     return;
   }
   if (activeIdx >= tracks.length) activeIdx = tracks.length-1;
-  rebuildChips();
-  renderAllTracks();
-  selectTrack(activeIdx < tracks.length ? activeIdx : 0);
+  rebuildChips(); renderAllTracks(); selectTrack(activeIdx);
 }
 
-// ── Render all ───────────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────────────────
 function renderAllTracks() { tracks.forEach((_,i) => renderTrack(i)); }
 
 function renderTrack(i) {
   const t = tracks[i];
-  const pts = t.points;
   Object.values(t.layers).forEach(l => { if(l) map.removeLayer(l); });
   t.layers = {};
-  if (!pts.length) return;
-  const ll = pts.map(p=>[p.lat,p.lon]);
-  const isActive = i === activeIdx;
-
-  if (t.trimStart > 0)
-    t.layers.excl1 = L.polyline(ll.slice(0, t.trimStart+1), { color:'#30363d', weight:2, opacity:.6 }).addTo(map);
-  if (t.trimEnd < pts.length-1)
-    t.layers.excl2 = L.polyline(ll.slice(t.trimEnd),       { color:'#30363d', weight:2, opacity:.6 }).addTo(map);
-
-  t.layers.active = L.polyline(ll.slice(t.trimStart, t.trimEnd+1), {
-    color: t.color, weight: isActive ? 5 : 3, opacity: isActive ? 1 : 0.6, lineCap:'round', lineJoin:'round'
+  if (!t.points.length) return;
+  const ll = t.points.map(p=>[p.lat,p.lon]);
+  const isActive = i===activeIdx;
+  if (t.trimStart>0)
+    t.layers.excl1 = L.polyline(ll.slice(0,t.trimStart+1), {color:'#30363d',weight:2,opacity:.6}).addTo(map);
+  if (t.trimEnd<t.points.length-1)
+    t.layers.excl2 = L.polyline(ll.slice(t.trimEnd),       {color:'#30363d',weight:2,opacity:.6}).addTo(map);
+  t.layers.active = L.polyline(ll.slice(t.trimStart,t.trimEnd+1), {
+    color:t.color, weight:isActive?5:3, opacity:isActive?1:.6, lineCap:'round', lineJoin:'round'
   }).addTo(map);
-
-  const mkIcon = c => L.divIcon({ html:`<div style="width:10px;height:10px;border-radius:50%;background:${c};border:2px solid #fff;box-shadow:0 0 6px ${c}88"></div>`, className:'', iconSize:[10,10], iconAnchor:[5,5] });
-  t.layers.mStart = L.marker([pts[t.trimStart].lat, pts[t.trimStart].lon], { icon: mkIcon('#3fb950') }).addTo(map);
-  t.layers.mEnd   = L.marker([pts[t.trimEnd].lat,   pts[t.trimEnd].lon],   { icon: mkIcon('#f85149') }).addTo(map);
+  const mkIcon = c => L.divIcon({html:`<div style="width:10px;height:10px;border-radius:50%;background:${c};border:2px solid #fff;box-shadow:0 0 6px ${c}88"></div>`,className:'',iconSize:[10,10],iconAnchor:[5,5]});
+  t.layers.mStart = L.marker([t.points[t.trimStart].lat,t.points[t.trimStart].lon],{icon:mkIcon('#3fb950')}).addTo(map);
+  t.layers.mEnd   = L.marker([t.points[t.trimEnd].lat,  t.points[t.trimEnd].lon],  {icon:mkIcon('#f85149')}).addTo(map);
 }
 
 function fitAll() {
-  const all = tracks.flatMap(t => t.points.map(p=>[p.lat,p.lon]));
-  if (all.length) map.fitBounds(L.latLngBounds(all), { padding:[30,30] });
+  const all = tracks.flatMap(t=>t.points.map(p=>[p.lat,p.lon]));
+  if (all.length) map.fitBounds(L.latLngBounds(all),{padding:[30,30]});
 }
 
-// ── Select ───────────────────────────────────────────────────────────────────
+// ── Select ────────────────────────────────────────────────────────────────────
 function selectTrack(i) {
   activeIdx = i;
   const t = tracks[i]; if(!t) return;
   rebuildChips();
   document.getElementById('pSelSec').style.setProperty('--tc', t.color);
   setTlColor(t.color);
-  buildTimelineUI();
-  updatePanelStats();
-  drawElevation();
+  buildTimelineUI(); updatePanelStats(); drawElevation();
   renderAllTracks();
   const pts = t.points;
-  if (pts.length) map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])), { padding:[40,40], maxZoom:19 });
+  if (pts.length) map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])),{padding:[40,40],maxZoom:19});
 }
 
 function setTlColor(color) {
@@ -356,11 +437,11 @@ function setTlColor(color) {
   document.getElementById('hEnd').style.background   = color;
 }
 
-// ── Timeline ─────────────────────────────────────────────────────────────────
+// ── Timeline ──────────────────────────────────────────────────────────────────
 function buildTimelineUI() {
   const t = tracks[activeIdx]; if(!t) return;
   const pts = t.points;
-  const totalSec = pts.length>=2 ? (pts[pts.length-1].time - pts[0].time)/1000 : 0;
+  const totalSec = pts.length>=2 ? (pts[pts.length-1].time-pts[0].time)/1000 : 0;
   document.getElementById('tlTitle').textContent = `${t.name} — drag handles to trim`;
   document.getElementById('tlT0').textContent = fmtTime(pts[0]?.time);
   document.getElementById('tlTm').textContent = fmtTime(new Date((pts[0]?.time?.getTime()||0)+totalSec*500));
@@ -373,15 +454,15 @@ function updateTlHandles() {
   const n = t.points.length-1;
   const sp = n>0 ? t.trimStart/n : 0;
   const ep = n>0 ? t.trimEnd/n   : 1;
-  document.getElementById('hStart').style.left = (sp*100)+'%';
-  document.getElementById('hEnd').style.left   = (ep*100)+'%';
+  document.getElementById('hStart').style.left  = (sp*100)+'%';
+  document.getElementById('hEnd').style.left    = (ep*100)+'%';
   document.getElementById('tlFill').style.left  = (sp*100)+'%';
   document.getElementById('tlFill').style.width = ((ep-sp)*100)+'%';
   document.getElementById('tlExclL').style.width = (sp*100)+'%';
   document.getElementById('tlExclR').style.width = ((1-ep)*100)+'%';
   document.getElementById('tipStart').textContent = fmtTime(t.points[t.trimStart]?.time);
   document.getElementById('tipEnd').textContent   = fmtTime(t.points[t.trimEnd]?.time);
-  const sel = t.points.slice(t.trimStart, t.trimEnd+1);
+  const sel = t.points.slice(t.trimStart,t.trimEnd+1);
   const dur = sel.length>=2 ? (sel[sel.length-1].time-sel[0].time)/1000 : 0;
   document.getElementById('tlDur').textContent = fmtDur(dur);
 }
@@ -389,7 +470,7 @@ function updateTlHandles() {
 // ── Panel stats ───────────────────────────────────────────────────────────────
 function updatePanelStats() {
   const t = tracks[activeIdx]; if(!t) return;
-  const pts = t.points, sel = pts.slice(t.trimStart, t.trimEnd+1);
+  const pts = t.points, sel = pts.slice(t.trimStart,t.trimEnd+1);
   const dur = sel.length>=2 ? (sel[sel.length-1].time-sel[0].time)/1000 : 0;
   document.getElementById('pStartT').textContent = fmtTime(pts[t.trimStart]?.time);
   document.getElementById('pEndT').textContent   = fmtTime(pts[t.trimEnd]?.time);
@@ -414,10 +495,10 @@ function drawElevation() {
   const canvas = document.getElementById('elevCanvas');
   const ctx = canvas.getContext('2d');
   const W = canvas.parentElement.clientWidth, H = canvas.parentElement.clientHeight;
-  canvas.width = W*2; canvas.height = H*2; ctx.scale(2,2);
+  canvas.width=W*2; canvas.height=H*2; ctx.scale(2,2);
   ctx.clearRect(0,0,W,H);
-  const t = tracks[activeIdx]; if(!t || t.points.length<2) return;
-  const pts = t.points, eles = pts.map(p=>p.ele);
+  const t = tracks[activeIdx]; if(!t||t.points.length<2) return;
+  const pts=t.points, eles=pts.map(p=>p.ele);
   const minE=Math.min(...eles), maxE=Math.max(...eles), rng=maxE-minE||1;
   const xOf = i => (i/(pts.length-1))*W;
   const yOf = e => H-4-((e-minE)/rng)*(H-8);
@@ -437,13 +518,10 @@ function drawElevation() {
   }
 }
 
-// ── Drag ─────────────────────────────────────────────────────────────────────
+// ── Drag ──────────────────────────────────────────────────────────────────────
 let dragging=null, tlRect=null;
+const pctToIdx = pct => { const t=tracks[activeIdx]; return t ? Math.round(pct*(t.points.length-1)) : 0; };
 
-function pctToIdx(pct) {
-  const t=tracks[activeIdx]; if(!t) return 0;
-  return Math.round(pct*(t.points.length-1));
-}
 function applyDrag(clientX) {
   if (!dragging||!tlRect) return;
   const t=tracks[activeIdx]; if(!t) return;
@@ -469,9 +547,9 @@ document.getElementById('hStart').addEventListener('mousedown', e=>beginDrag(e,'
 document.getElementById('hEnd').addEventListener('mousedown',   e=>beginDrag(e,'end'));
 document.addEventListener('mousemove', e=>applyDrag(e.clientX));
 document.addEventListener('mouseup', stopDrag);
-document.getElementById('hStart').addEventListener('touchstart', e=>beginDrag(e,'start'), {passive:false});
-document.getElementById('hEnd').addEventListener('touchstart',   e=>beginDrag(e,'end'),   {passive:false});
-document.addEventListener('touchmove', e=>applyDrag(e.touches[0].clientX), {passive:false});
+document.getElementById('hStart').addEventListener('touchstart', e=>beginDrag(e,'start'),{passive:false});
+document.getElementById('hEnd').addEventListener('touchstart',   e=>beginDrag(e,'end'),  {passive:false});
+document.addEventListener('touchmove', e=>applyDrag(e.touches[0].clientX),{passive:false});
 document.addEventListener('touchend', stopDrag);
 
 document.getElementById('tlTrack').addEventListener('click', e => {
@@ -496,9 +574,36 @@ function exportActive() {
   const t=tracks[activeIdx]; if(!t) return;
   const pts=t.points.slice(t.trimStart,t.trimEnd+1);
   const body=pts.map(p=>`      <trkpt lat="${p.lat}" lon="${p.lon}">\n        <ele>${p.ele}</ele>\n        <time>${p.time.toISOString()}</time>\n      </trkpt>`).join('\n');
-  const gpx=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="GPX Trimmer">\n  <trk>\n    <name>${esc(t.name)}_trimmed</name>\n    <trkseg>\n${body}\n    </trkseg>\n  </trk>\n</gpx>`;
+  const gpx=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="GPX Trimmer">\n  <trk>\n    <n>${esc(t.name)}_trimmed</n>\n    <trkseg>\n${body}\n    </trkseg>\n  </trk>\n</gpx>`;
   const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([gpx],{type:'application/gpx+xml'})),download:t.name+'_trimmed.gpx'});
   a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ── Panel toggle ──────────────────────────────────────────────────────────────
+const isMobile = () => window.innerWidth <= 768;
+
+function togglePanel() {
+  const panel = document.getElementById('panel');
+  if (isMobile()) {
+    // Mobile: toggle .open class; .ready class enables transitions
+    panel.classList.add('ready');
+    panel.classList.toggle('open');
+  } else {
+    // Desktop: use .collapsed class
+    const toggle = document.getElementById('panelToggle');
+    const nowCollapsed = panel.classList.toggle('collapsed');
+    toggle.classList.toggle('collapsed', nowCollapsed);
+  }
+  setTimeout(() => map.invalidateSize(), 300);
+}
+
+// On mobile: enable transitions after first paint (avoids animated open on load)
+if (isMobile()) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.getElementById('panel').classList.add('ready');
+    });
+  });
 }
 
 // ── File input / drop ─────────────────────────────────────────────────────────
@@ -507,7 +612,7 @@ const dropEl=document.getElementById('dropOverlay');
 document.addEventListener('dragover', e=>{e.preventDefault();dropEl.classList.add('show');});
 document.addEventListener('dragleave', e=>{if(!e.relatedTarget)dropEl.classList.remove('show');});
 document.addEventListener('drop', e=>{e.preventDefault();dropEl.classList.remove('show');if(e.dataTransfer.files.length)loadFiles(e.dataTransfer.files);});
-window.addEventListener('resize', ()=>{if(activeIdx>=0) drawElevation();});
+window.addEventListener('resize', ()=>{ if(activeIdx>=0) drawElevation(); });
 </script>
 </body>
 </html>
