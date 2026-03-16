@@ -1,5 +1,6 @@
-const CACHE     = 'gpx-trimmer-v2';
-const SHARE_KEY = 'gpx-trimmer-shared-files';
+const CACHE     = 'gpx-trimmer-v3';
+const SHARE_KEY = 'gpx-trimmer-share';
+
 const ASSETS = [
   './index.html',
   './manifest.json',
@@ -10,100 +11,101 @@ const ASSETS = [
   'https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow:wght@300;400;500;600&display=swap'
 ];
 
-// ── Install: pre-cache static assets ─────────────────────────────────────────
+// ── Install ───────────────────────────────────────────────────────────────────
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE).then(cache => cache.addAll(ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
   self.skipWaiting();
 });
 
-// ── Activate: purge old caches ────────────────────────────────────────────────
+// ── Activate: drop old caches ─────────────────────────────────────────────────
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE && k !== SHARE_KEY).map(k => caches.delete(k)))
     )
   );
   self.clients.claim();
 });
 
-// ── Fetch: handle share-target POST + normal cache-first ─────────────────────
+// ── Fetch ─────────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  const url = new URL(req.url);
 
-  // Intercept the share-target POST from Android's share sheet
-  if (url.pathname.endsWith('/share-target') && event.request.method === 'POST') {
-    event.respondWith(handleShareTarget(event.request));
+  // Intercept share-target POST — the manifest action points to ./index.html
+  // so the POST lands on index.html with the share data in the form body.
+  // We detect it by the presence of the multipart POST body.
+  if (req.method === 'POST' && url.pathname.includes('index.html')) {
+    event.respondWith(handleShareTarget(req));
     return;
   }
 
-  // Normal cache-first for everything else
+  // Cache-first for everything else
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request))
+    caches.match(req).then(cached => cached || fetch(req))
   );
 });
 
-// ── Share target handler ──────────────────────────────────────────────────────
+// ── Share Target handler ──────────────────────────────────────────────────────
 async function handleShareTarget(request) {
-  const formData = await request.formData();
-  const files = formData.getAll('gpx');   // field name from manifest share_target
+  try {
+    const formData = await request.formData();
 
-  if (files.length) {
-    // Serialize files to transferable objects and store in a special cache entry
-    const fileDataArray = await Promise.all(
-      files.map(async file => ({
-        name: file.name,
+    // Collect any files shared (field name matches manifest "name": "gpx")
+    const rawFiles = formData.getAll('gpx');
+
+    // Also try generic "file" / "files" fields some apps use
+    const extra = [...formData.getAll('file'), ...formData.getAll('files')];
+    const allFiles = [...rawFiles, ...extra].filter(f => f instanceof File && f.size > 0);
+
+    if (allFiles.length > 0) {
+      // Serialize to base64 so it survives the cache round-trip
+      const serialised = await Promise.all(allFiles.map(async file => ({
+        name: file.name || 'shared.gpx',
         type: file.type || 'application/gpx+xml',
-        data: await file.arrayBuffer()
-      }))
-    );
+        data: bufferToBase64(await file.arrayBuffer())
+      })));
 
-    // Open a dedicated cache bucket for the pending shared files
-    const shareCache = await caches.open(SHARE_KEY);
-    await shareCache.put(
-      './pending-share',
-      new Response(JSON.stringify(
-        fileDataArray.map(f => ({
-          name: f.name,
-          type: f.type,
-          // base64-encode the binary so it survives JSON serialization
-          data: bufferToBase64(f.data)
-        }))
-      ), { headers: { 'Content-Type': 'application/json' } })
-    );
+      const shareCache = await caches.open(SHARE_KEY);
+      await shareCache.put('./pending',
+        new Response(JSON.stringify(serialised),
+          { headers: { 'Content-Type': 'application/json' } })
+      );
 
-    // Tell all open windows to reload/check for pending files
-    const clients = await self.clients.matchAll({ type: 'window' });
-    for (const client of clients) {
-      client.postMessage({ type: 'SHARE_RECEIVED' });
+      // Notify any open tabs
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of clients) {
+        client.postMessage({ type: 'SHARE_RECEIVED' });
+      }
     }
+  } catch (e) {
+    console.error('[SW] share-target error:', e);
   }
 
-  // Redirect back to the app (302 so browser navigates to the main page)
-  return Response.redirect('./index.html', 302);
+  // Always redirect to the app page after handling
+  return Response.redirect('./index.html', 303);
 }
 
-// ── Utility: ArrayBuffer → base64 string ─────────────────────────────────────
-function bufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-// ── Message handler: page asks SW for pending shared files ───────────────────
+// ── Message from page: deliver pending shared files ───────────────────────────
 self.addEventListener('message', async event => {
-  if (event.data?.type === 'GET_SHARED_FILES') {
-    const shareCache = await caches.open(SHARE_KEY);
-    const response   = await shareCache.match('./pending-share');
+  if (event.data?.type !== 'GET_SHARED_FILES') return;
 
-    if (response) {
-      const files = await response.json();
-      await shareCache.delete('./pending-share');   // consume once
-      event.source.postMessage({ type: 'SHARED_FILES', files });
-    } else {
-      event.source.postMessage({ type: 'SHARED_FILES', files: [] });
-    }
+  const shareCache = await caches.open(SHARE_KEY);
+  const response   = await shareCache.match('./pending');
+
+  if (response) {
+    const files = await response.json();
+    await shareCache.delete('./pending');          // consume once
+    event.source.postMessage({ type: 'SHARED_FILES', files });
+  } else {
+    event.source.postMessage({ type: 'SHARED_FILES', files: [] });
   }
 });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let bin = '';
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}

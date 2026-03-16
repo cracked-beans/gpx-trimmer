@@ -3,30 +3,47 @@
   "short_name": "GPX Trim",
   "description": "Load, trim and export GPX tracks",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0d1117",
   "theme_color": "#f0a500",
   "orientation": "any",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ],
-
   "file_handlers": [
     {
       "action": "./index.html",
       "accept": {
-        "application/gpx+xml": [".gpx"],
-        "application/octet-stream": [".gpx"],
-        "text/xml": [".gpx"]
+        "application/gpx+xml": [
+          ".gpx"
+        ],
+        "application/octet-stream": [
+          ".gpx"
+        ],
+        "text/xml": [
+          ".gpx"
+        ],
+        "text/plain": [
+          ".gpx"
+        ]
       },
-      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }],
       "launch_type": "single-client"
     }
   ],
-
   "share_target": {
-    "action": "./share-target",
+    "action": "./index.html",
     "method": "POST",
     "enctype": "multipart/form-data",
     "params": {
@@ -36,7 +53,14 @@
       "files": [
         {
           "name": "gpx",
-          "accept": ["application/gpx+xml", "application/octet-stream", "text/xml", ".gpx"]
+          "accept": [
+            "application/gpx+xml",
+            "application/octet-stream",
+            "application/xml",
+            "text/xml",
+            "text/plain",
+            "*/*"
+          ]
         }
       ]
     }
