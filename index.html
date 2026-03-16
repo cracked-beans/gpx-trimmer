@@ -52,6 +52,15 @@
   .export-btn { display: flex; align-items: center; gap: 7px; background: #f0a500; border: none; border-radius: 6px; padding: 7px 13px; color: #0d1117; font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; flex-shrink: 0; white-space: nowrap; }
   .export-btn:hover { background: #ffc53d; }
   .export-btn:disabled { background: var(--surface3); color: var(--text-dim); cursor: default; }
+  .share-btn { display: flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 7px 13px; color: var(--text); font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: border-color .15s, color .15s, background .15s; flex-shrink: 0; white-space: nowrap; }
+  .share-btn:hover { border-color: #f0a500; color: #f0a500; background: rgba(240,165,0,.06); }
+  .share-btn:disabled { color: var(--text-dim); border-color: var(--border); cursor: default; }
+  /* On mobile: hide button text labels, show icon only */
+  @media (max-width: 768px) {
+    .btn-label { display: none; }
+    .file-btn, .export-btn, .share-btn { padding: 8px; }
+    .file-btn gap, .export-btn, .share-btn { gap: 0; }
+  }
 
   /* ── Main ── */
   .main { flex: 1; display: flex; overflow: hidden; position: relative; }
@@ -202,12 +211,16 @@
   <div class="sep"></div>
   <button class="file-btn" onclick="document.getElementById('fileInput').click()">
     <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-    Load GPX
+    <span class="btn-label">Load GPX</span>
   </button>
   <div class="chips-row" id="chipsRow"></div>
   <button class="export-btn" id="exportBtn" onclick="exportActive()" disabled>
     <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-    Export
+    <span class="btn-label">Export</span>
+  </button>
+  <button class="share-btn" id="shareBtn" onclick="shareActive()" disabled>
+    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+    <span class="btn-label">Share</span>
   </button>
 </header>
 
@@ -353,6 +366,7 @@ function loadFiles(files) {
     });
     document.getElementById('mapEmpty').style.display = 'none';
     document.getElementById('exportBtn').disabled = false;
+    document.getElementById('shareBtn').disabled = false;
     document.getElementById('panelEmpty').style.display = 'none';
     document.getElementById('panelContent').style.display = 'flex';
     rebuildChips();
@@ -386,6 +400,7 @@ function removeTrack(i) {
     document.getElementById('panelEmpty').style.display = 'flex';
     document.getElementById('panelContent').style.display = 'none';
     document.getElementById('exportBtn').disabled = true;
+    document.getElementById('shareBtn').disabled = true;
     document.getElementById('mapEmpty').style.display = 'flex';
     document.getElementById('tlTitle').textContent = 'Timeline — load a GPX file to start';
     document.getElementById('tlDur').textContent = '';
@@ -577,13 +592,51 @@ function resetTrim() {
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
+function buildGPX(t) {
+  const pts = t.points.slice(t.trimStart, t.trimEnd+1);
+  const body = pts.map(p=>`      <trkpt lat="${p.lat}" lon="${p.lon}">\n        <ele>${p.ele}</ele>\n        <time>${p.time.toISOString()}</time>\n      </trkpt>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="GPX Trimmer">\n  <trk>\n    <n>${esc(t.name)}_trimmed</n>\n    <trkseg>\n${body}\n    </trkseg>\n  </trk>\n</gpx>`;
+}
+
 function exportActive() {
   const t=tracks[activeIdx]; if(!t) return;
-  const pts=t.points.slice(t.trimStart,t.trimEnd+1);
-  const body=pts.map(p=>`      <trkpt lat="${p.lat}" lon="${p.lon}">\n        <ele>${p.ele}</ele>\n        <time>${p.time.toISOString()}</time>\n      </trkpt>`).join('\n');
-  const gpx=`<?xml version="1.0" encoding="UTF-8"?>\n<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="GPX Trimmer">\n  <trk>\n    <n>${esc(t.name)}_trimmed</n>\n    <trkseg>\n${body}\n    </trkseg>\n  </trk>\n</gpx>`;
+  const gpx = buildGPX(t);
   const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([gpx],{type:'application/gpx+xml'})),download:t.name+'_trimmed.gpx'});
   a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ── Share ─────────────────────────────────────────────────────────────────────
+async function shareActive() {
+  const t = tracks[activeIdx]; if(!t) return;
+  const gpx = buildGPX(t);
+  const filename = t.name + '_trimmed.gpx';
+  const file = new File([gpx], filename, { type: 'application/gpx+xml' });
+
+  // Use native share sheet if available (Android, iOS, modern desktop)
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: filename,
+        text: 'Trimmed GPX track from GPX Trimmer'
+      });
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        // Fallback: share just the text/url if file sharing fails
+        try {
+          await navigator.share({ title: filename, text: 'Trimmed GPX track' });
+        } catch (_) {}
+      }
+    }
+  } else if (navigator.share) {
+    // File sharing not supported — share text fallback
+    try {
+      await navigator.share({ title: filename, text: 'Trimmed GPX track from GPX Trimmer' });
+    } catch (_) {}
+  } else {
+    // Desktop fallback: just download
+    exportActive();
+  }
 }
 
 // ── Panel toggle ──────────────────────────────────────────────────────────────
