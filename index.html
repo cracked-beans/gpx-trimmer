@@ -606,48 +606,31 @@ function exportActive() {
 }
 
 // ── Share ─────────────────────────────────────────────────────────────────────
-async function shareActive() {
-  const t = tracks[activeIdx]; if(!t) return;
-  const gpx = buildGPX(t);
-  const filename = t.name + '_trimmed.gpx';
+// CRITICAL: navigator.share() MUST be called synchronously inside the click
+// handler — Android Chrome invalidates the user-gesture token the moment any
+// await / async gap occurs before the share() call.
+function shareActive() {
+  const t = tracks[activeIdx]; if (!t) return;
 
-  // Android requires a recognised MIME type for file sharing —
-  // application/octet-stream is the safest universal choice.
-  const file = new File([gpx], filename, { type: 'application/octet-stream' });
+  // Build GPX and File synchronously — no awaits before share()
+  const gpx      = buildGPX(t);
+  const filename = t.name + '_trimmed.gpx';
+  const file     = new File([gpx], filename, { type: 'application/octet-stream' });
 
   if (!navigator.share) {
-    // Browser has no Share API at all — fall back to download
-    exportActive();
+    exportActive();   // no Web Share API → just download
     return;
   }
 
-  // Try sharing the file first
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: filename });
-      return;
-    } catch (e) {
-      if (e.name === 'AbortError') return;   // user dismissed — not an error
-      // Otherwise fall through to next attempt
-    }
-  }
-
-  // canShare returned false or file share threw — try without canShare guard
-  // (some browsers support it but report canShare incorrectly)
-  try {
-    await navigator.share({ files: [file], title: filename });
-    return;
-  } catch (e) {
-    if (e.name === 'AbortError') return;
-  }
-
-  // Last resort: share as plain text / title only (no file)
-  try {
-    await navigator.share({ title: filename, text: gpx.substring(0, 500) + '...' });
-  } catch (_) {
-    // Nothing worked — silently fall back to download
-    exportActive();
-  }
+  // Call share() immediately while the user-gesture token is still valid.
+  // We deliberately skip the canShare() check here — it returns false for
+  // octet-stream on some Android builds even though share() works fine.
+  navigator.share({ files: [file], title: filename })
+    .catch(err => {
+      if (err.name === 'AbortError') return;        // user cancelled — fine
+      // File sharing failed (e.g. desktop Chrome) — fall back to download
+      exportActive();
+    });
 }
 
 // ── Panel toggle ──────────────────────────────────────────────────────────────
