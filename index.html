@@ -606,31 +606,69 @@ function exportActive() {
 }
 
 // ── Share ─────────────────────────────────────────────────────────────────────
-// CRITICAL: navigator.share() MUST be called synchronously inside the click
-// handler — Android Chrome invalidates the user-gesture token the moment any
-// await / async gap occurs before the share() call.
 function shareActive() {
   const t = tracks[activeIdx]; if (!t) return;
 
-  // Build GPX and File synchronously — no awaits before share()
   const gpx      = buildGPX(t);
   const filename = t.name + '_trimmed.gpx';
-  const file     = new File([gpx], filename, { type: 'application/octet-stream' });
 
+  // Diagnostics — visible in DevTools console
+  console.log('[Share] navigator.share:', typeof navigator.share);
+  console.log('[Share] navigator.canShare:', typeof navigator.canShare);
+  console.log('[Share] isSecureContext:', window.isSecureContext);
+
+  // Web Share API with files: supported on Android Chrome 75+, iOS Safari 15+.
+  // NOT supported on desktop Chrome/Firefox/Edge — they will always download.
   if (!navigator.share) {
-    exportActive();   // no Web Share API → just download
+    showToast('Share not supported on this browser — downloading instead');
+    exportActive();
     return;
   }
 
-  // Call share() immediately while the user-gesture token is still valid.
-  // We deliberately skip the canShare() check here — it returns false for
-  // octet-stream on some Android builds even though share() works fine.
-  navigator.share({ files: [file], title: filename })
-    .catch(err => {
-      if (err.name === 'AbortError') return;        // user cancelled — fine
-      // File sharing failed (e.g. desktop Chrome) — fall back to download
-      exportActive();
-    });
+  const file = new File([gpx], filename, { type: 'application/octet-stream' });
+  const canShareFiles = navigator.canShare && navigator.canShare({ files: [file] });
+  console.log('[Share] canShare files:', canShareFiles);
+
+  if (canShareFiles) {
+    // Android / iOS: share the actual file
+    navigator.share({ files: [file], title: filename })
+      .then(() => console.log('[Share] success'))
+      .catch(err => {
+        console.warn('[Share] error:', err.name, err.message);
+        if (err.name !== 'AbortError') {
+          showToast('File share failed — downloading instead');
+          exportActive();
+        }
+      });
+  } else {
+    // Share API exists but file sharing not supported on this platform
+    showToast('File share not supported — downloading instead');
+    exportActive();
+  }
+}
+
+// Small toast for share feedback
+function showToast(msg) {
+  let el = document.getElementById('share-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'share-toast';
+    el.style.cssText = [
+      'position:fixed', 'bottom:100px', 'left:50%',
+      'transform:translateX(-50%)',
+      'background:#1c2128', 'color:#e6edf3',
+      'border:1px solid #30363d', 'border-radius:8px',
+      'padding:10px 18px', 'font-size:13px',
+      'font-family:Barlow,sans-serif',
+      'z-index:9999', 'pointer-events:none',
+      'transition:opacity .3s'
+    ].join(';');
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.opacity = '0', 3000);
 }
 
 // ── Panel toggle ──────────────────────────────────────────────────────────────
