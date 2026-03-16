@@ -623,11 +623,59 @@ window.addEventListener('resize', ()=>{ if(activeIdx>=0) drawElevation(); });
 </script>
 
 <script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js');
+// ── Service Worker registration ───────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    const reg = await navigator.serviceWorker.register('./sw.js');
+
+    // Listen for the SW telling us a share just arrived
+    navigator.serviceWorker.addEventListener('message', event => {
+      if (event.data?.type === 'SHARE_RECEIVED' || event.data?.type === 'SHARED_FILES') {
+        if (event.data.type === 'SHARED_FILES' && event.data.files?.length) {
+          loadBase64Files(event.data.files);
+        } else if (event.data.type === 'SHARE_RECEIVED') {
+          // SW already stored the files; ask for them
+          requestSharedFiles();
+        }
+      }
     });
+
+    // On load, ask the SW if there are any pending shared files waiting
+    if (navigator.serviceWorker.controller) {
+      requestSharedFiles();
+    }
+  });
+}
+
+// Ask the service worker for any pending shared files
+function requestSharedFiles() {
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'GET_SHARED_FILES' });
   }
+}
+
+// Receive base64-encoded files from the SW and feed them into the app
+function loadBase64Files(fileObjects) {
+  const syntheticFiles = fileObjects.map(f => {
+    const binary = atob(f.data);
+    const bytes  = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: f.type || 'application/gpx+xml' });
+    return new File([blob], f.name, { type: blob.type });
+  });
+  loadFiles(syntheticFiles);   // hand straight to the app's existing loadFiles()
+}
+
+// ── File Handling API (launchQueue) ───────────────────────────────────────────
+// Handles the case where user taps a .gpx file and the OS opens this PWA
+if ('launchQueue' in window) {
+  window.launchQueue.setConsumer(async launchParams => {
+    if (!launchParams.files?.length) return;
+    const fileHandles = launchParams.files;
+    const files = await Promise.all(fileHandles.map(h => h.getFile()));
+    loadFiles(files);   // feed directly into the app
+  });
+}
 </script>
 </body>
 </html>
