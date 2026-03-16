@@ -610,31 +610,42 @@ async function shareActive() {
   const t = tracks[activeIdx]; if(!t) return;
   const gpx = buildGPX(t);
   const filename = t.name + '_trimmed.gpx';
-  const file = new File([gpx], filename, { type: 'application/gpx+xml' });
 
-  // Use native share sheet if available (Android, iOS, modern desktop)
+  // Android requires a recognised MIME type for file sharing —
+  // application/octet-stream is the safest universal choice.
+  const file = new File([gpx], filename, { type: 'application/octet-stream' });
+
+  if (!navigator.share) {
+    // Browser has no Share API at all — fall back to download
+    exportActive();
+    return;
+  }
+
+  // Try sharing the file first
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({
-        files: [file],
-        title: filename,
-        text: 'Trimmed GPX track from GPX Trimmer'
-      });
+      await navigator.share({ files: [file], title: filename });
+      return;
     } catch (e) {
-      if (e.name !== 'AbortError') {
-        // Fallback: share just the text/url if file sharing fails
-        try {
-          await navigator.share({ title: filename, text: 'Trimmed GPX track' });
-        } catch (_) {}
-      }
+      if (e.name === 'AbortError') return;   // user dismissed — not an error
+      // Otherwise fall through to next attempt
     }
-  } else if (navigator.share) {
-    // File sharing not supported — share text fallback
-    try {
-      await navigator.share({ title: filename, text: 'Trimmed GPX track from GPX Trimmer' });
-    } catch (_) {}
-  } else {
-    // Desktop fallback: just download
+  }
+
+  // canShare returned false or file share threw — try without canShare guard
+  // (some browsers support it but report canShare incorrectly)
+  try {
+    await navigator.share({ files: [file], title: filename });
+    return;
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+  }
+
+  // Last resort: share as plain text / title only (no file)
+  try {
+    await navigator.share({ title: filename, text: gpx.substring(0, 500) + '...' });
+  } catch (_) {
+    // Nothing worked — silently fall back to download
     exportActive();
   }
 }
